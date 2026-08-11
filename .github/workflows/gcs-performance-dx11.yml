@@ -1,0 +1,156 @@
+name: GCS Performance DX11
+
+on:
+  push:
+    branches:
+      - gcs-performance
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  SOLUTION_FILE_PATH: src/engine-vs2022.sln
+  BUILD_CONFIGURATION: DX11
+
+jobs:
+  build-gcs-dx11:
+    runs-on: windows-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Configure pagefile
+        uses: al-cheb/configure-pagefile-action@v1.3
+        with:
+          minimum-size: 8GB
+          maximum-size: 8GB
+          disk-root: "C:"
+
+      - name: Checkout pinned performance branch
+        uses: actions/checkout@v4
+        with:
+          ref: gcs-performance
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Verify pinned MT baseline ancestry
+        shell: pwsh
+        run: |
+          $baseline = "f3f5a8a3b5233205ff9764b1f5fd10ddaf31045e"
+          git cat-file -e "$baseline^{commit}"
+          if ($LASTEXITCODE -ne 0) { throw "Pinned MT baseline commit is unavailable" }
+          Write-Host "Pinned GAMMA/GCS MT baseline: $baseline"
+          git log -1 --oneline $baseline
+
+      - name: Apply GCS performance Pass 1
+        shell: pwsh
+        run: python gcs-engine/apply_pass1.py .
+
+      - name: Apply GCS performance Pass 2
+        shell: pwsh
+        run: python gcs-engine/apply_pass2.py .
+
+      - name: Validate source transforms
+        shell: pwsh
+        run: |
+          git diff --check
+          if ($LASTEXITCODE -ne 0) { throw "git diff --check failed" }
+          git diff -- src/xrGame/ui/UIActorMenuInventory.cpp src/xrGame/ui/UIActorMenuTrade.cpp src/xrGame/ui/UICellCustomItems.cpp
+
+      - name: Setup MSBuild x64
+        uses: microsoft/setup-msbuild@v1.3.1
+        with:
+          msbuild-architecture: x64
+
+      - name: Record build start
+        shell: pwsh
+        run: |
+          (Get-Date).ToUniversalTime().ToString("o") | Set-Content build_started_utc.txt
+          Get-Content build_started_utc.txt
+
+      - name: Build DX11
+        shell: pwsh
+        run: msbuild /m /p:Configuration=${{ env.BUILD_CONFIGURATION }} ${{ env.SOLUTION_FILE_PATH }}
+
+      - name: Collect and validate outputs
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $staging = Join-Path $env:GITHUB_WORKSPACE "gcs_dx11_artifact"
+          New-Item -ItemType Directory -Force -Path $staging | Out-Null
+
+          $knownDir = Join-Path $env:GITHUB_WORKSPACE "_build\_game\bin_dbg"
+          Write-Host "Known upstream output directory: $knownDir"
+          if (Test-Path $knownDir) {
+            Get-ChildItem $knownDir -File | Sort-Object Name | Format-Table FullName, Length, LastWriteTimeUtc -AutoSize
+          } else {
+            Write-Warning "Known bin_dbg directory was not created; recursive fallback will be used."
+          }
+
+          $buildStart = [DateTime]::Parse((Get-Content (Join-Path $env:GITHUB_WORKSPACE "build_started_utc.txt"))).ToUniversalTime()
+          $allCandidates = Get-ChildItem -Path $env:GITHUB_WORKSPACE -Recurse -File -ErrorAction SilentlyContinue |
+            Where-Object {
+              ($_.Extension -ieq ".exe" -or $_.Extension -ieq ".pdb") -and
+              $_.LastWriteTimeUtc -ge $buildStart.AddMinutes(-1)
+            } |
+            Sort-Object FullName -Unique
+
+          Write-Host "Recent EXE/PDB candidates:"
+          $allCandidates | Format-Table FullName, Length, LastWriteTimeUtc -AutoSize
+
+          $engineExe = @()
+          if (Test-Path $knownDir) {
+            $engineExe = @(Get-ChildItem $knownDir -File -Filter *.exe -ErrorAction SilentlyContinue |
+              Sort-Object Length -Descending)
+          }
+          if ($engineExe.Count -eq 0) {
+            $engineExe = @($allCandidates | Where-Object Extension -ieq ".exe" | Sort-Object Length -Descending)
+          }
+          if ($engineExe.Count -eq 0) { throw "No built DX11 executable found anywhere in workspace." }
+
+          $chosenExe = $engineExe[0]
+          Write-Host "Chosen DX11 executable: $($chosenExe.FullName) ($($chosenExe.Length) bytes)"
+          Copy-Item $chosenExe.FullName (Join-Path $staging "AnomalyDX11GCS_Perf.exe") -Force
+
+          $pdbCandidates = @()
+          if (Test-Path $knownDir) {
+            $pdbCandidates = @(Get-ChildItem $knownDir -File -Filter *.pdb -ErrorAction SilentlyContinue | Sort-Object Length -Descending)
+          }
+          if ($pdbCandidates.Count -eq 0) {
+            $pdbCandidates = @($allCandidates | Where-Object Extension -ieq ".pdb" | Sort-Object Length -Descending)
+          }
+          if ($pdbCandidates.Count -gt 0) {
+            Copy-Item $pdbCandidates[0].FullName (Join-Path $staging "AnomalyDX11GCS_Perf.pdb") -Force
+          } else {
+            Write-Warning "No matching PDB found; EXE will still be packaged."
+          }
+
+          @(
+            "GCS Performance DX11"
+            "Pinned MT baseline: f3f5a8a3b5233205ff9764b1f5fd10ddaf31045e"
+            "Configuration: DX11"
+            "Source executable: $($chosenExe.FullName)"
+            "Source executable bytes: $($chosenExe.Length)"
+            "Workflow commit: $env:GITHUB_SHA"
+          ) | Set-Content (Join-Path $staging "BUILD_INFO.txt")
+
+          Get-FileHash (Join-Path $staging "AnomalyDX11GCS_Perf.exe") -Algorithm SHA256 |
+            ForEach-Object { "$($_.Hash.ToLower())  AnomalyDX11GCS_Perf.exe" } |
+            Set-Content (Join-Path $staging "SHA256SUMS.txt")
+          if (Test-Path (Join-Path $staging "AnomalyDX11GCS_Perf.pdb")) {
+            Get-FileHash (Join-Path $staging "AnomalyDX11GCS_Perf.pdb") -Algorithm SHA256 |
+              ForEach-Object { "$($_.Hash.ToLower())  AnomalyDX11GCS_Perf.pdb" } |
+              Add-Content (Join-Path $staging "SHA256SUMS.txt")
+          }
+
+          Write-Host "Final staging contents:"
+          Get-ChildItem $staging -File | Format-Table Name, Length, LastWriteTimeUtc -AutoSize
+          Get-Content (Join-Path $staging "SHA256SUMS.txt")
+
+      - name: Upload optimized DX11 artifact
+        uses: actions/upload-artifact@v4.6.0
+        with:
+          name: GCS-Performance-DX11
+          path: gcs_dx11_artifact/
+          if-no-files-found: error
+          retention-days: 7
