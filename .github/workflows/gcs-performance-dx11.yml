@@ -9,6 +9,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: gcs-performance-dx11
+  cancel-in-progress: true
+
 env:
   SOLUTION_FILE_PATH: src/engine-vs2022.sln
   BUILD_CONFIGURATION: DX11
@@ -54,17 +58,54 @@ jobs:
         shell: pwsh
         run: python gcs-engine/apply_pass3.py .
 
+      - name: Apply GCS performance Pass 4
+        shell: pwsh
+        run: python gcs-engine/apply_pass4.py .
+
+      - name: Apply GCS performance Pass 5
+        shell: pwsh
+        run: python gcs-engine/apply_pass5.py .
+
+      - name: Apply GCS performance Pass 6
+        shell: pwsh
+        run: python gcs-engine/apply_pass6.py .
+
+      - name: Apply GCS performance Pass 7
+        shell: pwsh
+        run: python gcs-engine/apply_pass7.py .
+
       - name: Validate source transforms and minimap hook
         shell: pwsh
         run: |
           git diff --check
           if ($LASTEXITCODE -ne 0) { throw "git diff --check failed" }
-          git diff -- src/xrGame/ui/UIActorMenu.cpp src/xrGame/ui/UIActorMenuInventory.cpp src/xrGame/ui/UIActorMenuTrade.cpp src/xrGame/ui/UICellCustomItems.cpp src/xrGame/UIZoneMap.h src/xrGame/UIZoneMap.cpp
+
+          git diff -- `
+            src/xrGame/ui/UIActorMenu.cpp `
+            src/xrGame/ui/UIActorMenu.h `
+            src/xrGame/ui/UIActorMenuInventory.cpp `
+            src/xrGame/ui/UIActorMenuTrade.cpp `
+            src/xrGame/ui/UICellCustomItems.cpp `
+            src/xrGame/UIZoneMap.h `
+            src/xrGame/UIZoneMap.cpp
+
           $zoneH = Get-Content src/xrGame/UIZoneMap.h -Raw
           $zoneCpp = Get-Content src/xrGame/UIZoneMap.cpp -Raw
+          $trade = Get-Content src/xrGame/ui/UIActorMenuTrade.cpp -Raw
+          $cells = Get-Content src/xrGame/ui/UICellCustomItems.cpp -Raw
+          $inv = Get-Content src/xrGame/ui/UIActorMenuInventory.cpp -Raw
+
           if ($zoneH -notmatch 'CUIWindow& MapFrame\(\);') { throw "Live minimap declaration missing" }
           if ($zoneCpp -notmatch 'return \*m_activeMap;') { throw "Live minimap accessor is not returning CUIMiniMap" }
           if ($zoneH -match 'MapFrame\(\).*m_clipFrame') { throw "MapFrame regressed to fixed HUD clip frame" }
+
+          if ($trade -notmatch 'CanMoveToPartnerWithWeights') { throw "Pass 4 trade weight cache missing" }
+          if ($trade -notmatch 'filter_kinds') { throw "Pass 5 cached category parsing missing" }
+          if ($cells -notmatch 'layout_changed') { throw "Pass 6 layered-icon update guard missing" }
+          if ($trade -notmatch 'item_id_in_sorted_list') { throw "Pass 7 trade membership snapshot missing" }
+          if ($inv -notmatch 'actor_trade_weight') { throw "Pass 4 inventory-side trade cache missing" }
+
+          Write-Host "GCS performance Passes 1-7 validated."
           Write-Host "GCS live minimap zoom hook validated."
 
       - name: Setup MSBuild x64
@@ -138,7 +179,14 @@ jobs:
           @(
             "GCS Performance DX11"
             "Pinned MT baseline: f3f5a8a3b5233205ff9764b1f5fd10ddaf31045e"
-            "Performance passes: 1, 2, 3"
+            "Performance passes: 1, 2, 3, 4, 5, 6, 7"
+            "Pass 1: inventory/trade list scan and filter hoists"
+            "Pass 2: cached trader weight + actor-menu XML reuse"
+            "Pass 3: actor-state refresh throttle + live minimap zoom hook"
+            "Pass 4: trade eligibility selected-weight caching"
+            "Pass 5: cached inventory category parsing"
+            "Pass 6: layered inventory icon per-frame work reduction"
+            "Pass 7: trade selected-list membership snapshots"
             "Live minimap zoom hook: CUIMiniMap via UIZoneMap.MapFrame()"
             "Configuration: DX11"
             "Source executable: $($chosenExe.FullName)"
@@ -157,6 +205,7 @@ jobs:
 
           Write-Host "Final staging contents:"
           Get-ChildItem $staging -File | Format-Table Name, Length, LastWriteTimeUtc -AutoSize
+          Get-Content (Join-Path $staging "BUILD_INFO.txt")
           Get-Content (Join-Path $staging "SHA256SUMS.txt")
 
       - name: Upload optimized DX11 artifact
