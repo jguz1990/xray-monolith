@@ -50,12 +50,22 @@ jobs:
         shell: pwsh
         run: python gcs-engine/apply_pass2.py .
 
-      - name: Validate source transforms
+      - name: Apply GCS performance Pass 3
+        shell: pwsh
+        run: python gcs-engine/apply_pass3.py .
+
+      - name: Validate source transforms and minimap hook
         shell: pwsh
         run: |
           git diff --check
           if ($LASTEXITCODE -ne 0) { throw "git diff --check failed" }
-          git diff -- src/xrGame/ui/UIActorMenuInventory.cpp src/xrGame/ui/UIActorMenuTrade.cpp src/xrGame/ui/UICellCustomItems.cpp
+          git diff -- src/xrGame/ui/UIActorMenu.cpp src/xrGame/ui/UIActorMenuInventory.cpp src/xrGame/ui/UIActorMenuTrade.cpp src/xrGame/ui/UICellCustomItems.cpp src/xrGame/UIZoneMap.h src/xrGame/UIZoneMap.cpp
+          $zoneH = Get-Content src/xrGame/UIZoneMap.h -Raw
+          $zoneCpp = Get-Content src/xrGame/UIZoneMap.cpp -Raw
+          if ($zoneH -notmatch 'CUIWindow& MapFrame\(\);') { throw "Live minimap declaration missing" }
+          if ($zoneCpp -notmatch 'return \*m_activeMap;') { throw "Live minimap accessor is not returning CUIMiniMap" }
+          if ($zoneH -match 'MapFrame\(\).*m_clipFrame') { throw "MapFrame regressed to fixed HUD clip frame" }
+          Write-Host "GCS live minimap zoom hook validated."
 
       - name: Setup MSBuild x64
         uses: microsoft/setup-msbuild@v1.3.1
@@ -128,6 +138,8 @@ jobs:
           @(
             "GCS Performance DX11"
             "Pinned MT baseline: f3f5a8a3b5233205ff9764b1f5fd10ddaf31045e"
+            "Performance passes: 1, 2, 3"
+            "Live minimap zoom hook: CUIMiniMap via UIZoneMap.MapFrame()"
             "Configuration: DX11"
             "Source executable: $($chosenExe.FullName)"
             "Source executable bytes: $($chosenExe.Length)"
