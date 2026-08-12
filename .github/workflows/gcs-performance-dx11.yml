@@ -74,6 +74,10 @@ jobs:
         shell: pwsh
         run: python gcs-engine/apply_pass7.py .
 
+      - name: Apply GCS MT Pass 8
+        shell: pwsh
+        run: python gcs-engine/apply_pass8.py .
+
       - name: Validate source transforms and source-native minimap hook
         shell: pwsh
         run: |
@@ -85,13 +89,19 @@ jobs:
             src/xrGame/ui/UIActorMenu.h `
             src/xrGame/ui/UIActorMenuInventory.cpp `
             src/xrGame/ui/UIActorMenuTrade.cpp `
-            src/xrGame/ui/UICellCustomItems.cpp
+            src/xrGame/ui/UICellCustomItems.cpp `
+            src/xrEngine/device.h `
+            src/xrEngine/device.cpp `
+            src/xrEngine/EngineThreading.cpp
 
           $zoneH = Get-Content src/xrGame/UIZoneMap.h -Raw
           $zoneCpp = Get-Content src/xrGame/UIZoneMap.cpp -Raw
           $trade = Get-Content src/xrGame/ui/UIActorMenuTrade.cpp -Raw
           $cells = Get-Content src/xrGame/ui/UICellCustomItems.cpp -Raw
           $inv = Get-Content src/xrGame/ui/UIActorMenuInventory.cpp -Raw
+          $deviceH = Get-Content src/xrEngine/device.h -Raw
+          $deviceCpp = Get-Content src/xrEngine/device.cpp -Raw
+          $threading = Get-Content src/xrEngine/EngineThreading.cpp -Raw
 
           if ($zoneH -notmatch 'CUIWindow& MapFrame\(\);') { throw "Source-native live minimap declaration missing" }
           if ($zoneCpp -notmatch 'return \*m_activeMap;') { throw "Source-native live minimap accessor is not returning CUIMiniMap" }
@@ -103,8 +113,16 @@ jobs:
           if ($trade -notmatch 'item_id_in_sorted_list') { throw "Pass 7 trade membership snapshot missing" }
           if ($inv -notmatch 'actor_trade_weight') { throw "Pass 4 inventory-side trade cache missing" }
 
-          Write-Host "GCS performance Passes 1-7 validated."
+          if ($deviceH -notmatch 'xr_atomic_bool isRendering') { throw "MT Pass 8 atomic render stop signal missing" }
+          if ($deviceCpp -notmatch 'isRendering\.store\(true, std::memory_order_relaxed\)') { throw "MT Pass 8 render-start atomic store missing" }
+          if ($deviceCpp -notmatch 'isRendering\.store\(false, std::memory_order_relaxed\)') { throw "MT Pass 8 render-stop atomic store missing" }
+          if ($threading -notmatch 'lua_gc_count') { throw "MT Pass 8 worker-local Lua GC counter missing" }
+          if ($threading -notmatch 'isRendering\.load\(std::memory_order_relaxed\)') { throw "MT Pass 8 atomic worker load missing" }
+          if ($threading -match 'Device\.LuaGCCount\+\+') { throw "MT Pass 8 regressed to shared per-step Lua GC counter writes" }
+
+          Write-Host "GCS performance Passes 1-8 validated."
           Write-Host "GCS source-native live minimap zoom hook validated."
+          Write-Host "GCS MT Pass 8 synchronization and Lua-GC handoff validated."
 
       - name: Setup MSBuild x64
         uses: microsoft/setup-msbuild@v1.3.1
@@ -177,7 +195,7 @@ jobs:
           @(
             "GCS Performance DX11"
             "Pinned MT baseline: f3f5a8a3b5233205ff9764b1f5fd10ddaf31045e"
-            "Performance passes: 1, 2, 3, 4, 5, 6, 7"
+            "Performance passes: 1, 2, 3, 4, 5, 6, 7, 8"
             "Pass 1: inventory/trade list scan and filter hoists"
             "Pass 2: cached trader weight + actor-menu XML reuse"
             "Pass 3: actor-state refresh throttle"
@@ -185,6 +203,7 @@ jobs:
             "Pass 5: cached inventory category parsing"
             "Pass 6: layered inventory icon per-frame work reduction"
             "Pass 7: trade selected-list membership snapshots"
+            "Pass 8 MT: atomic render/worker stop signal + worker-local Lua GC accounting"
             "Source-native live minimap zoom hook: CUIMiniMap via UIZoneMap.MapFrame()"
             "Configuration: DX11"
             "Source executable: $($chosenExe.FullName)"
