@@ -78,6 +78,10 @@ jobs:
         shell: pwsh
         run: python gcs-engine/apply_pass8.py .
 
+      - name: Apply GCS MT Pass 9
+        shell: pwsh
+        run: python gcs-engine/apply_pass9.py .
+
       - name: Validate source transforms and source-native minimap hook
         shell: pwsh
         run: |
@@ -120,9 +124,13 @@ jobs:
           if ($threading -notmatch 'isRendering\.load\(std::memory_order_relaxed\)') { throw "MT Pass 8 atomic worker load missing" }
           if ($threading -match 'Device\.LuaGCCount\+\+') { throw "MT Pass 8 regressed to shared per-step Lua GC counter writes" }
 
-          Write-Host "GCS performance Passes 1-8 validated."
+          if ($threading -notmatch 'SpatialSnapshot\(const ISpatialShared&') { throw "MT Pass 9 snapshot reference optimization missing" }
+          if ($threading -notmatch 'for \(const ISpatialShared& spatial : spatials\)') { throw "MT Pass 9 spatial reference iteration missing" }
+          if ($threading -notmatch 'spatialsSnapshot\.reserve\(spatials\.size\(\)\)') { throw "MT Pass 9 snapshot reserve missing" }
+
+          Write-Host "GCS performance Passes 1-9 validated."
           Write-Host "GCS source-native live minimap zoom hook validated."
-          Write-Host "GCS MT Pass 8 synchronization and Lua-GC handoff validated."
+          Write-Host "GCS MT Passes 8-9 validated."
 
       - name: Setup MSBuild x64
         uses: microsoft/setup-msbuild@v1.3.1
@@ -195,7 +203,7 @@ jobs:
           @(
             "GCS Performance DX11"
             "Pinned MT baseline: f3f5a8a3b5233205ff9764b1f5fd10ddaf31045e"
-            "Performance passes: 1, 2, 3, 4, 5, 6, 7, 8"
+            "Performance passes: 1, 2, 3, 4, 5, 6, 7, 8, 9"
             "Pass 1: inventory/trade list scan and filter hoists"
             "Pass 2: cached trader weight + actor-menu XML reuse"
             "Pass 3: actor-state refresh throttle"
@@ -204,6 +212,7 @@ jobs:
             "Pass 6: layered inventory icon per-frame work reduction"
             "Pass 7: trade selected-list membership snapshots"
             "Pass 8 MT: atomic render/worker stop signal + worker-local Lua GC accounting"
+            "Pass 9 MT: reduced atomic intrusive-pointer refcount churn in bone worker"
             "Source-native live minimap zoom hook: CUIMiniMap via UIZoneMap.MapFrame()"
             "Configuration: DX11"
             "Source executable: $($chosenExe.FullName)"
