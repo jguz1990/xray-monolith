@@ -29,6 +29,12 @@ CUIZoneMap::~CUIZoneMap()
 {
 }
 
+CUIWindow& CUIZoneMap::MapFrame()
+{
+	R_ASSERT(m_activeMap);
+	return *m_activeMap;
+}
+
 void CUIZoneMap::Init()
 {
 	CUIXml uiXml;
