@@ -6,8 +6,6 @@ if len(sys.argv) != 2:
 
 root = Path(sys.argv[1])
 actor_menu = root / "src/xrGame/ui/UIActorMenu.cpp"
-zone_h = root / "src/xrGame/UIZoneMap.h"
-zone_cpp = root / "src/xrGame/UIZoneMap.cpp"
 
 
 def replace_exact(path: Path, old: str, new: str, expected: int = 1) -> None:
@@ -62,32 +60,4 @@ replace_exact(
     "\telse\n",
 )
 
-# GCS live minimap zoom changes the CUIMiniMap content size while leaving the
-# circular HUD clip/background fixed. Upstream MapFrame() returns m_clipFrame,
-# which only resizes the HUD frame. Keep the existing Lua API name but point it
-# at the live CUIMiniMap object. Implement out-of-line because CUIMiniMap is only
-# forward-declared in UIZoneMap.h.
-replace_exact(
-    zone_h,
-    "\tCUIWindow& MapFrame() { return m_clipFrame; };\n",
-    "\tCUIWindow& MapFrame();\n",
-)
-
-replace_exact(
-    zone_cpp,
-    "CUIZoneMap::~CUIZoneMap()\n"
-    "{\n"
-    "}\n\n"
-    "void CUIZoneMap::Init()\n",
-    "CUIZoneMap::~CUIZoneMap()\n"
-    "{\n"
-    "}\n\n"
-    "CUIWindow& CUIZoneMap::MapFrame()\n"
-    "{\n"
-    "\tR_ASSERT(m_activeMap);\n"
-    "\treturn *m_activeMap;\n"
-    "}\n\n"
-    "void CUIZoneMap::Init()\n",
-)
-
-print("GCS Pass 3 source transforms applied successfully (UI throttle + live minimap zoom hook).")
+print("GCS Pass 3 source transforms applied successfully (actor-state UI throttle).")
