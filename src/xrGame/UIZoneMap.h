@@ -38,7 +38,9 @@ public:
 	bool ZoomOut();
 
 	CUIStatic& Background() { return m_background; };
-	CUIWindow& MapFrame() { return m_clipFrame; };
+	// GCS: Lua MapFrame() intentionally exposes the live minimap content so
+	// gcs_minimap_zoom.script can resize map content without resizing the fixed HUD clip.
+	CUIWindow& MapFrame();
 	void SetupCurrentMap();
 	void OnSectorChanged(int sector);
 	void Counter_ResetClrAnimation();
