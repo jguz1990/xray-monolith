@@ -74,7 +74,7 @@ jobs:
         shell: pwsh
         run: python gcs-engine/apply_pass7.py .
 
-      - name: Validate source transforms and minimap hook
+      - name: Validate source transforms and source-native minimap hook
         shell: pwsh
         run: |
           git diff --check
@@ -85,9 +85,7 @@ jobs:
             src/xrGame/ui/UIActorMenu.h `
             src/xrGame/ui/UIActorMenuInventory.cpp `
             src/xrGame/ui/UIActorMenuTrade.cpp `
-            src/xrGame/ui/UICellCustomItems.cpp `
-            src/xrGame/UIZoneMap.h `
-            src/xrGame/UIZoneMap.cpp
+            src/xrGame/ui/UICellCustomItems.cpp
 
           $zoneH = Get-Content src/xrGame/UIZoneMap.h -Raw
           $zoneCpp = Get-Content src/xrGame/UIZoneMap.cpp -Raw
@@ -95,8 +93,8 @@ jobs:
           $cells = Get-Content src/xrGame/ui/UICellCustomItems.cpp -Raw
           $inv = Get-Content src/xrGame/ui/UIActorMenuInventory.cpp -Raw
 
-          if ($zoneH -notmatch 'CUIWindow& MapFrame\(\);') { throw "Live minimap declaration missing" }
-          if ($zoneCpp -notmatch 'return \*m_activeMap;') { throw "Live minimap accessor is not returning CUIMiniMap" }
+          if ($zoneH -notmatch 'CUIWindow& MapFrame\(\);') { throw "Source-native live minimap declaration missing" }
+          if ($zoneCpp -notmatch 'return \*m_activeMap;') { throw "Source-native live minimap accessor is not returning CUIMiniMap" }
           if ($zoneH -match 'MapFrame\(\).*m_clipFrame') { throw "MapFrame regressed to fixed HUD clip frame" }
 
           if ($trade -notmatch 'CanMoveToPartnerWithWeights') { throw "Pass 4 trade weight cache missing" }
@@ -106,7 +104,7 @@ jobs:
           if ($inv -notmatch 'actor_trade_weight') { throw "Pass 4 inventory-side trade cache missing" }
 
           Write-Host "GCS performance Passes 1-7 validated."
-          Write-Host "GCS live minimap zoom hook validated."
+          Write-Host "GCS source-native live minimap zoom hook validated."
 
       - name: Setup MSBuild x64
         uses: microsoft/setup-msbuild@v1.3.1
@@ -182,12 +180,12 @@ jobs:
             "Performance passes: 1, 2, 3, 4, 5, 6, 7"
             "Pass 1: inventory/trade list scan and filter hoists"
             "Pass 2: cached trader weight + actor-menu XML reuse"
-            "Pass 3: actor-state refresh throttle + live minimap zoom hook"
+            "Pass 3: actor-state refresh throttle"
             "Pass 4: trade eligibility selected-weight caching"
             "Pass 5: cached inventory category parsing"
             "Pass 6: layered inventory icon per-frame work reduction"
             "Pass 7: trade selected-list membership snapshots"
-            "Live minimap zoom hook: CUIMiniMap via UIZoneMap.MapFrame()"
+            "Source-native live minimap zoom hook: CUIMiniMap via UIZoneMap.MapFrame()"
             "Configuration: DX11"
             "Source executable: $($chosenExe.FullName)"
             "Source executable bytes: $($chosenExe.Length)"
