@@ -45,19 +45,36 @@ new_header = (
 replace_exact(inv, old_header, new_header, expected=1)
 replace_exact(trade, old_header, new_header, expected=2)
 
-old_loop = (
+# Inventory filtering is directly inside the item loop (three tabs).
+old_inv_loop = (
     "\t\t\tfor (int i = 0; i < kinds; i++)\n"
     "\t\t\t{\n"
     "\t\t\t\tstring256 kind;\n"
     "\t\t\t\t_GetItem(m_sort_kinds[mode], i, kind);\n\n"
     "\t\t\t\tif (iitm->m_kind != NULL && iitm->m_kind.equal(kind))\n"
 )
-new_loop = (
+new_inv_loop = (
     "\t\t\tfor (const shared_str& kind : filter_kinds)\n"
     "\t\t\t{\n"
     "\t\t\t\tif (iitm->m_kind != NULL && iitm->m_kind.equal(kind))\n"
 )
-replace_exact(inv, old_loop, new_loop, expected=1)
-replace_exact(trade, old_loop, new_loop, expected=2)
+replace_exact(inv, old_inv_loop, new_inv_loop, expected=1)
+
+# Trade filters have one extra nesting level inside the selected-list membership
+# check, so their category loops are indented four tabs. Keep a distinct anchor
+# rather than depending on whitespace that only matches the inventory function.
+old_trade_loop = (
+    "\t\t\t\tfor (int i = 0; i < kinds; i++)\n"
+    "\t\t\t\t{\n"
+    "\t\t\t\t\tstring256 kind;\n"
+    "\t\t\t\t\t_GetItem(m_sort_kinds[mode], i, kind);\n\n"
+    "\t\t\t\t\tif (iitm->m_kind != NULL && iitm->m_kind.equal(kind))\n"
+)
+new_trade_loop = (
+    "\t\t\t\tfor (const shared_str& kind : filter_kinds)\n"
+    "\t\t\t\t{\n"
+    "\t\t\t\t\tif (iitm->m_kind != NULL && iitm->m_kind.equal(kind))\n"
+)
+replace_exact(trade, old_trade_loop, new_trade_loop, expected=2)
 
 print("GCS Pass 5 source transforms applied successfully (cached inventory category parsing).")
