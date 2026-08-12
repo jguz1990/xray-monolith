@@ -33,11 +33,24 @@ replace_exact(
 )
 
 # InitInventoryContents is also used to build the actor side when trade opens.
+# Anchor the complete ruck block with `curr_list = pBagList` so the transform
+# cannot accidentally match the earlier belt iterator block.
 replace_exact(
     inv,
+    "\tcurr_list = pBagList;\n\n"
     "\titb = ruck_list.begin();\n"
     "\tite = ruck_list.end();\n\n"
-    "\tfor (; itb != ite; ++itb)\n",
+    "\tfor (; itb != ite; ++itb)\n"
+    "\t{\n"
+    "\t\tCMPPlayersBag* bag = smart_cast<CMPPlayersBag*>(&(*itb)->object());\n"
+    "\t\tif (bag)\n"
+    "\t\t\tcontinue;\n\n"
+    "\t\tCUICellItem* itm = create_cell_item(*itb);\n"
+    "\t\tcurr_list->SetItem(itm);\n"
+    "\t\tif (m_currMenuMode == mmTrade && m_pPartnerInvOwner)\n"
+    "\t\t\tColorizeItem(itm, !CanMoveToPartner(*itb));\n"
+    "\t}\n",
+    "\tcurr_list = pBagList;\n\n"
     "\titb = ruck_list.begin();\n"
     "\tite = ruck_list.end();\n\n"
     "\tfloat actor_trade_weight = 0.0f;\n"
@@ -47,16 +60,16 @@ replace_exact(
     "\t\tactor_trade_weight = CalcItemsWeight(m_pTradeActorList);\n"
     "\t\tpartner_trade_weight = CalcItemsWeight(m_pTradePartnerList);\n"
     "\t}\n\n"
-    "\tfor (; itb != ite; ++itb)\n",
-    expected=1,
-)
-replace_exact(
-    inv,
+    "\tfor (; itb != ite; ++itb)\n"
+    "\t{\n"
+    "\t\tCMPPlayersBag* bag = smart_cast<CMPPlayersBag*>(&(*itb)->object());\n"
+    "\t\tif (bag)\n"
+    "\t\t\tcontinue;\n\n"
+    "\t\tCUICellItem* itm = create_cell_item(*itb);\n"
+    "\t\tcurr_list->SetItem(itm);\n"
     "\t\tif (m_currMenuMode == mmTrade && m_pPartnerInvOwner)\n"
-    "\t\t\tColorizeItem(itm, !CanMoveToPartner(*itb));\n",
-    "\t\tif (m_currMenuMode == mmTrade && m_pPartnerInvOwner)\n"
-    "\t\t\tColorizeItem(itm, !CanMoveToPartnerWithWeights(*itb, actor_trade_weight, partner_trade_weight));\n",
-    expected=1,
+    "\t\t\tColorizeItem(itm, !CanMoveToPartnerWithWeights(*itb, actor_trade_weight, partner_trade_weight));\n"
+    "\t}\n",
 )
 
 # Pass 1 has already hoisted show_all/kinds at this point in the build pipeline.
