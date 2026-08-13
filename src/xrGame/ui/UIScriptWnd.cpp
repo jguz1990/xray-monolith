@@ -61,7 +61,7 @@ void CUIDialogWndEx::AddCallback(LPCSTR control_id, s16 evt, const ::luabind::fu
 			return;
 		}
 	}
-	// No existing callback, create new one
+	// No existing callback, create new
 	SCallbackInfo* c = NewCallback();
 	c->m_callback.set(functor, object);
 	c->m_control_name = control_id;
@@ -72,6 +72,11 @@ void CUIDialogWndEx::AddCallback(LPCSTR control_id, s16 evt, const ::luabind::fu
 bool CUIDialogWndEx::OnKeyboardAction(int dik, EUIMessages keyboard_action)
 {
 	return inherited::OnKeyboardAction(dik, keyboard_action);
+}
+
+bool CUIDialogWndEx::OnMouseAction(float x, float y, EUIMessages mouse_action)
+{
+	return inherited::OnMouseAction(x, y, mouse_action);
 }
 
 void CUIDialogWndEx::Update()
