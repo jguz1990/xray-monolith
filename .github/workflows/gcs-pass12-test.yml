@@ -1,0 +1,96 @@
+name: GCS Pass12 Test
+
+on:
+  push:
+    branches: [gcs-performance]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gcs-pass12-test
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - name: Configure pagefile
+        uses: al-cheb/configure-pagefile-action@v1.3
+        with:
+          minimum-size: 8GB
+          maximum-size: 8GB
+          disk-root: "C:"
+
+      - uses: actions/checkout@v4
+        with:
+          ref: gcs-performance
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Apply GCS passes 1 through 12
+        shell: pwsh
+        run: |
+          1..12 | ForEach-Object {
+            $script = "gcs-engine/apply_pass$_.py"
+            if (-not (Test-Path $script)) { throw "Missing $script" }
+            python $script .
+            if ($LASTEXITCODE -ne 0) { throw "$script failed" }
+          }
+
+      - name: Validate wheel and minimap hooks
+        shell: pwsh
+        run: |
+          $a = Get-Content src/xrGame/ui/UIScriptWnd.cpp -Raw
+          $b = Get-Content src/xrGame/ui/UIWindow_script.cpp -Raw
+          $c = Get-Content src/xrGame/ui/uiscriptwnd_script.h -Raw
+          $d = Get-Content src/xrGame/ui/uiscriptwnd_script2.cpp -Raw
+          $z = Get-Content src/xrGame/UIZoneMap.cpp -Raw
+          if ($a -notmatch 'OnMouseAction') { throw 'OnMouseAction missing' }
+          if ($b -notmatch 'WINDOW_MOUSE_WHEEL_UP') { throw 'wheel up missing' }
+          if ($b -notmatch 'WINDOW_MOUSE_WHEEL_DOWN') { throw 'wheel down missing' }
+          if ($c -notmatch 'OnMouse') { throw 'Lua OnMouse wrapper missing' }
+          if ($d -notmatch '\.def\("OnMouse"') { throw 'Lua OnMouse registration missing' }
+          if ($z -notmatch 'return \*m_activeMap;') { throw 'minimap hook missing' }
+          Write-Host 'Pass 12 and minimap hooks validated.'
+
+      - uses: microsoft/setup-msbuild@v1.3.1
+        with:
+          msbuild-architecture: x64
+
+      - name: Build DX11
+        shell: pwsh
+        run: msbuild /m /p:Configuration=DX11 src/engine-vs2022.sln
+
+      - name: Package test build
+        shell: pwsh
+        run: |
+          $out = Join-Path $env:GITHUB_WORKSPACE 'gcs_pass12_test'
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+          $bin = Join-Path $env:GITHUB_WORKSPACE '_build\_game\bin_dbg'
+          $exe = Join-Path $bin 'AnomalyDX11.exe'
+          $pdb = Join-Path $bin 'AnomalyDX11.pdb'
+          if (-not (Test-Path $exe)) { throw 'AnomalyDX11.exe not found' }
+          if (-not (Test-Path $pdb)) { throw 'AnomalyDX11.pdb not found' }
+          Copy-Item $exe (Join-Path $out 'AnomalyDX11GCS_Pass12.exe') -Force
+          Copy-Item $pdb (Join-Path $out 'AnomalyDX11.pdb') -Force
+          @(
+            'GCS DX11 Pass 12 test build'
+            'Performance passes: 1-12'
+            'Wheel hook source: upstream commit 1662b5021a1be404e5e5387c64a4f73e9b0b15a6'
+            'xrGame is statically linked into the executable; no replacement xrGame.dll is required.'
+            "Commit: $env:GITHUB_SHA"
+          ) | Set-Content (Join-Path $out 'BUILD_INFO.txt')
+          Get-ChildItem $out -File | ForEach-Object {
+            $h = Get-FileHash $_.FullName -Algorithm SHA256
+            "$($h.Hash.ToLower())  $($_.Name)"
+          } | Set-Content (Join-Path $out 'SHA256SUMS.txt')
+
+      - uses: actions/upload-artifact@v4.6.0
+        with:
+          name: GCS-DX11-Pass12-Test
+          path: gcs_pass12_test/
+          if-no-files-found: error
+          retention-days: 7
