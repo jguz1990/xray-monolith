@@ -82,6 +82,10 @@ jobs:
         shell: pwsh
         run: python gcs-engine/apply_pass9.py .
 
+      - name: Apply GCS UI synchronization Pass 10
+        shell: pwsh
+        run: python gcs-engine/apply_pass10.py .
+
       - name: Validate source transforms and source-native minimap hook
         shell: pwsh
         run: |
@@ -94,6 +98,7 @@ jobs:
             src/xrGame/ui/UIActorMenuInventory.cpp `
             src/xrGame/ui/UIActorMenuTrade.cpp `
             src/xrGame/ui/UICellCustomItems.cpp `
+            src/xrGame/ui/UIWindow.cpp `
             src/xrEngine/device.h `
             src/xrEngine/device.cpp `
             src/xrEngine/EngineThreading.cpp
@@ -103,6 +108,7 @@ jobs:
           $trade = Get-Content src/xrGame/ui/UIActorMenuTrade.cpp -Raw
           $cells = Get-Content src/xrGame/ui/UICellCustomItems.cpp -Raw
           $inv = Get-Content src/xrGame/ui/UIActorMenuInventory.cpp -Raw
+          $uiWindow = Get-Content src/xrGame/ui/UIWindow.cpp -Raw
           $deviceH = Get-Content src/xrEngine/device.h -Raw
           $deviceCpp = Get-Content src/xrEngine/device.cpp -Raw
           $threading = Get-Content src/xrEngine/EngineThreading.cpp -Raw
@@ -128,9 +134,13 @@ jobs:
           if ($threading -notmatch 'for \(const ISpatialShared& spatial : spatials\)') { throw "MT Pass 9 spatial reference iteration missing" }
           if ($threading -notmatch 'spatialsSnapshot\.reserve\(spatials\.size\(\)\)') { throw "MT Pass 9 snapshot reserve missing" }
 
-          Write-Host "GCS performance Passes 1-9 validated."
+          if ($uiWindow -notmatch 'GCS Pass 10: synchronize deferred-delete queue with DetachChild') { throw "Pass 10 CollectGarbage synchronization missing" }
+          if ($uiWindow -notmatch 'GCS Pass 10: this vector is also consumed by CollectGarbage') { throw "Pass 10 DetachChild synchronization missing" }
+
+          Write-Host "GCS performance Passes 1-10 validated."
           Write-Host "GCS source-native live minimap zoom hook validated."
           Write-Host "GCS MT Passes 8-9 validated."
+          Write-Host "GCS UI synchronization Pass 10 validated."
 
       - name: Setup MSBuild x64
         uses: microsoft/setup-msbuild@v1.3.1
@@ -203,7 +213,7 @@ jobs:
           @(
             "GCS Performance DX11"
             "Pinned MT baseline: f3f5a8a3b5233205ff9764b1f5fd10ddaf31045e"
-            "Performance passes: 1, 2, 3, 4, 5, 6, 7, 8, 9"
+            "Performance passes: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10"
             "Pass 1: inventory/trade list scan and filter hoists"
             "Pass 2: cached trader weight + actor-menu XML reuse"
             "Pass 3: actor-state refresh throttle"
@@ -213,6 +223,7 @@ jobs:
             "Pass 7: trade selected-list membership snapshots"
             "Pass 8 MT: atomic render/worker stop signal + worker-local Lua GC accounting"
             "Pass 9 MT: reduced atomic intrusive-pointer refcount churn in bone worker"
+            "Pass 10 UI: synchronized CUIWindow deferred-delete queue between game/render threads"
             "Source-native live minimap zoom hook: CUIMiniMap via UIZoneMap.MapFrame()"
             "Configuration: DX11"
             "Source executable: $($chosenExe.FullName)"
