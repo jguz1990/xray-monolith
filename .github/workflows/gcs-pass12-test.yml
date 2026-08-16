@@ -1,4 +1,4 @@
-name: GCS Pass12 Test
+name: GCS Pass13 Crash Test
 
 on:
   push:
@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: gcs-pass12-test
+  group: gcs-pass13-test
   cancel-in-progress: true
 
 jobs:
@@ -30,31 +30,34 @@ jobs:
           fetch-depth: 0
           submodules: recursive
 
-      - name: Apply GCS passes 1 through 12
+      - name: Apply GCS passes 1 through 13
         shell: pwsh
         run: |
-          1..12 | ForEach-Object {
+          1..13 | ForEach-Object {
             $script = "gcs-engine/apply_pass$_.py"
             if (-not (Test-Path $script)) { throw "Missing $script" }
             python $script .
             if ($LASTEXITCODE -ne 0) { throw "$script failed" }
           }
 
-      - name: Validate wheel and minimap hooks
+      - name: Validate crash fix, wheel and minimap hooks
         shell: pwsh
         run: |
+          $ui = Get-Content src/xrGame/UIGameCustom.cpp -Raw
           $a = Get-Content src/xrGame/ui/UIScriptWnd.cpp -Raw
           $b = Get-Content src/xrGame/ui/UIWindow_script.cpp -Raw
           $c = Get-Content src/xrGame/ui/uiscriptwnd_script.h -Raw
           $d = Get-Content src/xrGame/ui/uiscriptwnd_script2.cpp -Raw
           $z = Get-Content src/xrGame/UIZoneMap.cpp -Raw
+          if ($ui -notmatch 'GCS Pass 13: prevent UIMainIngameWnd destruction') { throw 'Pass 13 UnLoad guard missing' }
+          if ($ui -notmatch 'GCS Pass 13: serialize UI construction') { throw 'Pass 13 Load guard missing' }
           if ($a -notmatch 'OnMouseAction') { throw 'OnMouseAction missing' }
           if ($b -notmatch 'WINDOW_MOUSE_WHEEL_UP') { throw 'wheel up missing' }
           if ($b -notmatch 'WINDOW_MOUSE_WHEEL_DOWN') { throw 'wheel down missing' }
           if ($c -notmatch 'OnMouse') { throw 'Lua OnMouse wrapper missing' }
           if ($d -notmatch '\.def\("OnMouse"') { throw 'Lua OnMouse registration missing' }
           if ($z -notmatch 'return \*m_activeMap;') { throw 'minimap hook missing' }
-          Write-Host 'Pass 12 and minimap hooks validated.'
+          Write-Host 'Pass 13 crash fix, Pass 12 wheel hooks, and minimap hook validated.'
 
       - uses: microsoft/setup-msbuild@v1.3.1
         with:
@@ -67,20 +70,21 @@ jobs:
       - name: Package test build
         shell: pwsh
         run: |
-          $out = Join-Path $env:GITHUB_WORKSPACE 'gcs_pass12_test'
+          $out = Join-Path $env:GITHUB_WORKSPACE 'gcs_pass13_test'
           New-Item -ItemType Directory -Force -Path $out | Out-Null
           $bin = Join-Path $env:GITHUB_WORKSPACE '_build\_game\bin_dbg'
           $exe = Join-Path $bin 'AnomalyDX11.exe'
           $pdb = Join-Path $bin 'AnomalyDX11.pdb'
           if (-not (Test-Path $exe)) { throw 'AnomalyDX11.exe not found' }
           if (-not (Test-Path $pdb)) { throw 'AnomalyDX11.pdb not found' }
-          Copy-Item $exe (Join-Path $out 'AnomalyDX11GCS_Pass12.exe') -Force
+          Copy-Item $exe (Join-Path $out 'AnomalyDX11GCS_Perf.exe') -Force
           Copy-Item $pdb (Join-Path $out 'AnomalyDX11.pdb') -Force
           @(
-            'GCS DX11 Pass 12 test build'
-            'Performance passes: 1-12'
-            'Wheel hook source: upstream commit 1662b5021a1be404e5e5387c64a4f73e9b0b15a6'
-            'xrGame is statically linked into the executable; no replacement xrGame.dll is required.'
+            'GCS DX11 Pass 13 crash test build'
+            'Performance passes: 1-13'
+            'Pass 13: CUIGameCustom Load/UnLoad synchronized directly with RenderUI lifetime lock'
+            'Pass 12 wheel hook source: upstream commit 1662b5021a1be404e5e5387c64a4f73e9b0b15a6'
+            'Source-native minimap hook retained.'
             "Commit: $env:GITHUB_SHA"
           ) | Set-Content (Join-Path $out 'BUILD_INFO.txt')
           Get-ChildItem $out -File | ForEach-Object {
@@ -90,7 +94,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4.6.0
         with:
-          name: GCS-DX11-Pass12-Test
-          path: gcs_pass12_test/
+          name: GCS-DX11-Pass13-Crash-Test
+          path: gcs_pass13_test/
           if-no-files-found: error
           retention-days: 7
