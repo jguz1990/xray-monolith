@@ -15,14 +15,18 @@
 extern xr_token motion_dirs[];
 #endif
 
-Fvector& global_hit_position(Fvector& gp, CEntityAlive& ea, const SHit& H)
+bool global_hit_position(Fvector& gp, CEntityAlive& ea, const SHit& H)
 {
-	VERIFY(ea.Visual());
+	if (!ea.Visual())
+		return false;
+
 	IKinematics* K = ea.Visual()->dcast_PKinematics();
-	VERIFY(K);
+	if (!K || H.bone() == BI_NONE)
+		return false;
+
 	K->LL_GetTransform(H.bone()).transform_tiny(gp, H.bone_space_position());
 	ea.XFORM().transform_tiny(gp);
-	return gp;
+	return true;
 }
 
 type_motion::edirection type_motion::dir(CEntityAlive& ea, const SHit& H, float& angle)
@@ -69,8 +73,7 @@ bool is_bone_head(IKinematics& K, u16 bone)
 	const u16 head_bone = K.LL_BoneID("bip01_head");
 	const u16 neck_bone = K.LL_BoneID("bip01_neck");
 	return (bone != BI_NONE) &&
-		neck_bone == bone ||
-		find_in_parents(head_bone, bone, K);
+		(neck_bone == bone || find_in_parents(head_bone, bone, K));
 }
 
 void type_motion_diagnostic(LPCSTR message, type_motion::edirection dr, const CEntityAlive& ea, const SHit& H,
@@ -140,7 +143,9 @@ class type_motion0 : public type_motion
 		if (type_motion::front != type_motion::dir(ea, H, angle))
 			return false;
 		Fvector p;
-		if (Fvector().sub(H.initiator()->Position(), global_hit_position(p, ea, H)).magnitude() > 30.f)
+		if (!global_hit_position(p, ea, H))
+			return false;
+		if (Fvector().sub(H.initiator()->Position(), p).magnitude() > 30.f)
 			return false;
 
 		m = motion(front);
@@ -184,8 +189,10 @@ class type_motion2 : public type_motion
 				return false;
 		}		
 		Fvector p;
+		if (!global_hit_position(p, ea, H))
+			return false;
 		const float max_distance = 20.f;
-		if (Fvector().sub(H.initiator()->Position(), global_hit_position(p, ea, H)).magnitude() > max_distance)
+		if (Fvector().sub(H.initiator()->Position(), p).magnitude() > max_distance)
 			return false;
 		edirection dr = dir(ea, H, angle);
 		m = motion(dr);
