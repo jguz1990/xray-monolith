@@ -1,4 +1,4 @@
-name: GCS Pass14 Crash Test
+name: GCS Stable Recovery
 
 on:
   push:
@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: gcs-pass14-test
+  group: gcs-stable-recovery
   cancel-in-progress: true
 
 jobs:
@@ -30,37 +30,53 @@ jobs:
           fetch-depth: 0
           submodules: recursive
 
-      - name: Apply GCS passes 1 through 14
+      - name: Apply stable GCS performance passes 1 through 7
         shell: pwsh
         run: |
-          1..14 | ForEach-Object {
+          1..7 | ForEach-Object {
             $script = "gcs-engine/apply_pass$_.py"
             if (-not (Test-Path $script)) { throw "Missing $script" }
             python $script .
             if ($LASTEXITCODE -ne 0) { throw "$script failed" }
           }
 
-      - name: Validate crash fix, wheel and minimap hooks
+      - name: Apply independent wheel-event backport
         shell: pwsh
         run: |
+          python gcs-engine/apply_pass12.py .
+          if ($LASTEXITCODE -ne 0) { throw 'Pass 12 wheel backport failed' }
+
+      - name: Validate stable recovery source
+        shell: pwsh
+        run: |
+          $dev = Get-Content src/xrEngine/device.h -Raw
+          $thr = Get-Content src/xrEngine/EngineThreading.cpp -Raw
           $ui = Get-Content src/xrGame/UIGameCustom.cpp -Raw
+          $wnd = Get-Content src/xrGame/ui/UIWindow.cpp -Raw
           $main = Get-Content src/xrGame/ui/UIMainIngameWnd.cpp -Raw
           $a = Get-Content src/xrGame/ui/UIScriptWnd.cpp -Raw
           $b = Get-Content src/xrGame/ui/UIWindow_script.cpp -Raw
           $c = Get-Content src/xrGame/ui/uiscriptwnd_script.h -Raw
           $d = Get-Content src/xrGame/ui/uiscriptwnd_script2.cpp -Raw
           $z = Get-Content src/xrGame/UIZoneMap.cpp -Raw
-          if ($ui -notmatch 'GCS Pass 13: prevent UIMainIngameWnd destruction') { throw 'Pass 13 UnLoad guard missing' }
-          if ($ui -notmatch 'UIMainIngameWnd && GameIndicatorsShown') { throw 'Pass 14 null-safe HUD update/render missing' }
-          if ($main -notmatch 'GCS Pass 14: any destruction path must invalidate the owner') { throw 'Pass 14 destructor lifetime guard missing' }
-          if ($main -notmatch 'game_ui->UIMainIngameWnd = nullptr') { throw 'Pass 14 owner invalidation missing' }
-          if ($a -notmatch 'OnMouseAction') { throw 'OnMouseAction missing' }
+
+          # Recovery rule: do not apply experimental MT/UI lifetime passes 8-11 or 13-14.
+          if ($dev -match 'GCS MT Pass 8') { throw 'Pass 8 unexpectedly present' }
+          if ($thr -match 'lua_gc_count') { throw 'Pass 8 worker rewrite unexpectedly present' }
+          if ($thr -match 'for \(const ISpatialShared& spatial : spatials\)') { throw 'Pass 9 unexpectedly present' }
+          if ($wnd -match 'GCS Pass 10') { throw 'Pass 10 unexpectedly present' }
+          if ($ui -match 'GCS Pass 13') { throw 'Pass 13 unexpectedly present' }
+          if ($main -match 'GCS Pass 14') { throw 'Pass 14 unexpectedly present' }
+
+          # Stable functionality retained.
+          if ($z -notmatch 'return \*m_activeMap;') { throw 'source-native minimap hook missing' }
+          if ($a -notmatch 'OnMouseAction') { throw 'wheel OnMouseAction missing' }
           if ($b -notmatch 'WINDOW_MOUSE_WHEEL_UP') { throw 'wheel up missing' }
           if ($b -notmatch 'WINDOW_MOUSE_WHEEL_DOWN') { throw 'wheel down missing' }
           if ($c -notmatch 'OnMouse') { throw 'Lua OnMouse wrapper missing' }
           if ($d -notmatch '\.def\("OnMouse"') { throw 'Lua OnMouse registration missing' }
-          if ($z -notmatch 'return \*m_activeMap;') { throw 'minimap hook missing' }
-          Write-Host 'Pass 14 crash fix, Pass 12 wheel hooks, and minimap hook validated.'
+
+          Write-Host 'Stable recovery validated: Passes 1-7 + wheel backport; experimental Passes 8-11/13-14 absent.'
 
       - uses: microsoft/setup-msbuild@v1.3.1
         with:
@@ -70,10 +86,10 @@ jobs:
         shell: pwsh
         run: msbuild /m /p:Configuration=DX11 src/engine-vs2022.sln
 
-      - name: Package test build
+      - name: Package stable recovery build
         shell: pwsh
         run: |
-          $out = Join-Path $env:GITHUB_WORKSPACE 'gcs_pass14_test'
+          $out = Join-Path $env:GITHUB_WORKSPACE 'gcs_stable_recovery'
           New-Item -ItemType Directory -Force -Path $out | Out-Null
           $bin = Join-Path $env:GITHUB_WORKSPACE '_build\_game\bin_dbg'
           $exe = Join-Path $bin 'AnomalyDX11.exe'
@@ -83,12 +99,12 @@ jobs:
           Copy-Item $exe (Join-Path $out 'AnomalyDX11GCS_Perf.exe') -Force
           Copy-Item $pdb (Join-Path $out 'AnomalyDX11.pdb') -Force
           @(
-            'GCS DX11 Pass 14 crash test build'
-            'Performance passes: 1-14'
-            'Pass 14: CUIMainIngameWnd destructor invalidates CUIGameCustom owner pointer under ui_lock before base csUi teardown'
-            'Pass 13: CUIGameCustom Load/UnLoad synchronized directly with RenderUI lifetime lock'
-            'Pass 12 wheel hook source: upstream commit 1662b5021a1be404e5e5387c64a4f73e9b0b15a6'
-            'Source-native minimap hook retained.'
+            'GCS DX11 stable recovery build'
+            'Performance passes enabled: 1-7'
+            'Experimental MT passes 8-9 removed from this build.'
+            'Experimental crash-containment passes 10-11 and 13-14 removed from this build.'
+            'Pass 12 retained only as the isolated upstream Lua mouse-wheel event backport.'
+            'Source-native minimap MapFrame hook retained.'
             "Commit: $env:GITHUB_SHA"
           ) | Set-Content (Join-Path $out 'BUILD_INFO.txt')
           Get-ChildItem $out -File | ForEach-Object {
@@ -98,7 +114,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4.6.0
         with:
-          name: GCS-DX11-Pass14-Crash-Test
-          path: gcs_pass14_test/
+          name: GCS-DX11-Stable-Recovery
+          path: gcs_stable_recovery/
           if-no-files-found: error
           retention-days: 7
