@@ -39,6 +39,18 @@ jobs:
           if ($actual -ne $expected) { throw "Wrong recovery baseline: $actual" }
           Write-Host "Recovery baseline verified: $actual"
 
+      - name: Import anchor-hardened Pass 4 and Pass 5 scripts
+        shell: pwsh
+        run: |
+          git show origin/gcs-performance:gcs-engine/apply_pass4.py | Set-Content -Encoding utf8 gcs-engine/apply_pass4.py
+          if ($LASTEXITCODE -ne 0) { throw 'Unable to import hardened Pass 4 script' }
+          git show origin/gcs-performance:gcs-engine/apply_pass5.py | Set-Content -Encoding utf8 gcs-engine/apply_pass5.py
+          if ($LASTEXITCODE -ne 0) { throw 'Unable to import hardened Pass 5 script' }
+          $p4 = Get-Content gcs-engine/apply_pass4.py -Raw
+          $p5 = Get-Content gcs-engine/apply_pass5.py -Raw
+          if ($p4 -notmatch 'curr_list = pBagList') { throw 'Pass 4 hardened anchor not imported' }
+          if ($p5 -notmatch 'trade_old') { throw 'Pass 5 hardened trade anchor not imported' }
+
       - name: Apply stable GCS performance passes 1 through 7
         shell: pwsh
         run: |
@@ -80,7 +92,8 @@ jobs:
           if ($hud -match 'GCS Pass 11') { throw 'Pass 11 unexpectedly present' }
           if (Test-Path gcs-engine/apply_pass12.py) { throw 'Post-stable Pass 12 exists in checkout; wrong baseline' }
 
-          Write-Host 'Isolated stable recovery validated: exact afbf2b33 baseline + Passes 1-7 only.'
+          Write-Host 'Isolated stable recovery validated: exact afbf2b33 source + runtime Passes 1-7 only.'
+          Write-Host 'Pass 4/5 use later anchor-hardened scripts with unchanged intended runtime transforms.'
 
       - uses: microsoft/setup-msbuild@v1.3.1
         with:
@@ -105,7 +118,8 @@ jobs:
           @(
             'GCS DX11 stable recovery build'
             'Exact source baseline: afbf2b33bb238017ea87322c5c659795ea187d39'
-            'Performance passes enabled: 1-7 only'
+            'Runtime performance passes enabled: 1-7 only'
+            'Pass 4/5 patch scripts: anchor-hardened versions; intended transforms unchanged'
             'Passes 8-14: NOT INCLUDED'
             'Smooth-scrolling wheel backport: NOT INCLUDED in this crash-isolation build'
             'Live minimap MapFrame behavior retained through stable Pass 3'
