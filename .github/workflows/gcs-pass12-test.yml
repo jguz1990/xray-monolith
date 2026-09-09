@@ -24,11 +24,20 @@ jobs:
           maximum-size: 8GB
           disk-root: "C:"
 
-      - uses: actions/checkout@v4
+      - name: Checkout exact pre-MT stable performance source
+        uses: actions/checkout@v4
         with:
-          ref: gcs-performance
+          ref: afbf2b33bb238017ea87322c5c659795ea187d39
           fetch-depth: 0
           submodules: recursive
+
+      - name: Verify recovery baseline
+        shell: pwsh
+        run: |
+          $expected = 'afbf2b33bb238017ea87322c5c659795ea187d39'
+          $actual = (git rev-parse HEAD).Trim()
+          if ($actual -ne $expected) { throw "Wrong recovery baseline: $actual" }
+          Write-Host "Recovery baseline verified: $actual"
 
       - name: Apply stable GCS performance passes 1 through 7
         shell: pwsh
@@ -40,43 +49,38 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw "$script failed" }
           }
 
-      - name: Apply independent wheel-event backport
+      - name: Validate isolated stable source
         shell: pwsh
         run: |
-          python gcs-engine/apply_pass12.py .
-          if ($LASTEXITCODE -ne 0) { throw 'Pass 12 wheel backport failed' }
+          git diff --check
+          if ($LASTEXITCODE -ne 0) { throw 'git diff --check failed' }
 
-      - name: Validate stable recovery source
-        shell: pwsh
-        run: |
           $dev = Get-Content src/xrEngine/device.h -Raw
           $thr = Get-Content src/xrEngine/EngineThreading.cpp -Raw
-          $ui = Get-Content src/xrGame/UIGameCustom.cpp -Raw
           $wnd = Get-Content src/xrGame/ui/UIWindow.cpp -Raw
-          $main = Get-Content src/xrGame/ui/UIMainIngameWnd.cpp -Raw
-          $a = Get-Content src/xrGame/ui/UIScriptWnd.cpp -Raw
-          $b = Get-Content src/xrGame/ui/UIWindow_script.cpp -Raw
-          $c = Get-Content src/xrGame/ui/uiscriptwnd_script.h -Raw
-          $d = Get-Content src/xrGame/ui/uiscriptwnd_script2.cpp -Raw
-          $z = Get-Content src/xrGame/UIZoneMap.cpp -Raw
+          $hud = Get-Content src/xrGame/HUDManager.cpp -Raw
+          $zoneH = Get-Content src/xrGame/UIZoneMap.h -Raw
+          $zoneCpp = Get-Content src/xrGame/UIZoneMap.cpp -Raw
+          $trade = Get-Content src/xrGame/ui/UIActorMenuTrade.cpp -Raw
+          $cells = Get-Content src/xrGame/ui/UICellCustomItems.cpp -Raw
 
-          # Recovery rule: do not apply experimental MT/UI lifetime passes 8-11 or 13-14.
+          # Stable performance work must be present.
+          if ($trade -notmatch 'CanMoveToPartnerWithWeights') { throw 'Pass 4 missing' }
+          if ($trade -notmatch 'filter_kinds') { throw 'Pass 5 missing' }
+          if ($cells -notmatch 'layout_changed') { throw 'Pass 6 missing' }
+          if ($trade -notmatch 'item_id_in_sorted_list') { throw 'Pass 7 missing' }
+          if ($zoneH -notmatch 'CUIWindow& MapFrame\(\);') { throw 'minimap declaration missing' }
+          if ($zoneCpp -notmatch 'return \*m_activeMap;') { throw 'live minimap accessor missing' }
+
+          # Everything added after the stable point must be absent.
           if ($dev -match 'GCS MT Pass 8') { throw 'Pass 8 unexpectedly present' }
           if ($thr -match 'lua_gc_count') { throw 'Pass 8 worker rewrite unexpectedly present' }
           if ($thr -match 'for \(const ISpatialShared& spatial : spatials\)') { throw 'Pass 9 unexpectedly present' }
           if ($wnd -match 'GCS Pass 10') { throw 'Pass 10 unexpectedly present' }
-          if ($ui -match 'GCS Pass 13') { throw 'Pass 13 unexpectedly present' }
-          if ($main -match 'GCS Pass 14') { throw 'Pass 14 unexpectedly present' }
+          if ($hud -match 'GCS Pass 11') { throw 'Pass 11 unexpectedly present' }
+          if (Test-Path gcs-engine/apply_pass12.py) { throw 'Post-stable Pass 12 exists in checkout; wrong baseline' }
 
-          # Stable functionality retained.
-          if ($z -notmatch 'return \*m_activeMap;') { throw 'source-native minimap hook missing' }
-          if ($a -notmatch 'OnMouseAction') { throw 'wheel OnMouseAction missing' }
-          if ($b -notmatch 'WINDOW_MOUSE_WHEEL_UP') { throw 'wheel up missing' }
-          if ($b -notmatch 'WINDOW_MOUSE_WHEEL_DOWN') { throw 'wheel down missing' }
-          if ($c -notmatch 'OnMouse') { throw 'Lua OnMouse wrapper missing' }
-          if ($d -notmatch '\.def\("OnMouse"') { throw 'Lua OnMouse registration missing' }
-
-          Write-Host 'Stable recovery validated: Passes 1-7 + wheel backport; experimental Passes 8-11/13-14 absent.'
+          Write-Host 'Isolated stable recovery validated: exact afbf2b33 baseline + Passes 1-7 only.'
 
       - uses: microsoft/setup-msbuild@v1.3.1
         with:
@@ -100,12 +104,12 @@ jobs:
           Copy-Item $pdb (Join-Path $out 'AnomalyDX11.pdb') -Force
           @(
             'GCS DX11 stable recovery build'
-            'Performance passes enabled: 1-7'
-            'Experimental MT passes 8-9 removed from this build.'
-            'Experimental crash-containment passes 10-11 and 13-14 removed from this build.'
-            'Pass 12 retained only as the isolated upstream Lua mouse-wheel event backport.'
-            'Source-native minimap MapFrame hook retained.'
-            "Commit: $env:GITHUB_SHA"
+            'Exact source baseline: afbf2b33bb238017ea87322c5c659795ea187d39'
+            'Performance passes enabled: 1-7 only'
+            'Passes 8-14: NOT INCLUDED'
+            'Smooth-scrolling wheel backport: NOT INCLUDED in this crash-isolation build'
+            'Live minimap MapFrame behavior retained through stable Pass 3'
+            "Workflow trigger commit: $env:GITHUB_SHA"
           ) | Set-Content (Join-Path $out 'BUILD_INFO.txt')
           Get-ChildItem $out -File | ForEach-Object {
             $h = Get-FileHash $_.FullName -Algorithm SHA256
