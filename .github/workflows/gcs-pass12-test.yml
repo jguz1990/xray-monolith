@@ -49,7 +49,7 @@ jobs:
           $p4 = Get-Content gcs-engine/apply_pass4.py -Raw
           $p5 = Get-Content gcs-engine/apply_pass5.py -Raw
           if ($p4 -notmatch 'curr_list = pBagList') { throw 'Pass 4 hardened anchor not imported' }
-          if ($p5 -notmatch 'trade_old') { throw 'Pass 5 hardened trade anchor not imported' }
+          if ($p5 -notmatch 'old_trade_loop') { throw 'Pass 5 hardened trade anchor not imported' }
 
       - name: Apply stable GCS performance passes 1 through 7
         shell: pwsh
@@ -76,7 +76,6 @@ jobs:
           $trade = Get-Content src/xrGame/ui/UIActorMenuTrade.cpp -Raw
           $cells = Get-Content src/xrGame/ui/UICellCustomItems.cpp -Raw
 
-          # Stable performance work must be present.
           if ($trade -notmatch 'CanMoveToPartnerWithWeights') { throw 'Pass 4 missing' }
           if ($trade -notmatch 'filter_kinds') { throw 'Pass 5 missing' }
           if ($cells -notmatch 'layout_changed') { throw 'Pass 6 missing' }
@@ -84,7 +83,6 @@ jobs:
           if ($zoneH -notmatch 'CUIWindow& MapFrame\(\);') { throw 'minimap declaration missing' }
           if ($zoneCpp -notmatch 'return \*m_activeMap;') { throw 'live minimap accessor missing' }
 
-          # Everything added after the stable point must be absent.
           if ($dev -match 'GCS MT Pass 8') { throw 'Pass 8 unexpectedly present' }
           if ($thr -match 'lua_gc_count') { throw 'Pass 8 worker rewrite unexpectedly present' }
           if ($thr -match 'for \(const ISpatialShared& spatial : spatials\)') { throw 'Pass 9 unexpectedly present' }
