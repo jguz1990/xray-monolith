@@ -6,6 +6,9 @@ if len(sys.argv) != 2:
 
 root = Path(sys.argv[1])
 hud_cpp = root / "src/xrGame/HUDManager.cpp"
+zone_h = root / "src/xrGame/UIZoneMap.h"
+zone_cpp = root / "src/xrGame/UIZoneMap.cpp"
+actor_menu_script = root / "src/xrGame/ui/UIActorMenu_script.cpp"
 
 
 def replace_exact(path: Path, old: str, new: str, expected: int = 1) -> None:
@@ -99,4 +102,75 @@ replace_exact(
     "\tif (!pUIGame)\n",
 )
 
-print("GCS Pass 11 applied: serialized HUD UI load/reload/destruction with RenderUI.")
+# The GCS live-zoom hook originally repurposed CUIZoneMap::MapFrame() to return
+# m_activeMap. Native engine code also uses MapFrame() as the fixed clip/window
+# parent for UIMotionIcon, so changing that method's meaning moved an engine-owned
+# HUD child under the zoomed map content. Restore the upstream/native MapFrame()
+# contract and expose the live CUIMiniMap through a separate MapContent() accessor.
+replace_exact(
+    zone_h,
+    "\tCUIStatic& Background() { return m_background; };\n"
+    "\t// GCS: Lua MapFrame() intentionally exposes the live minimap content so\n"
+    "\t// gcs_minimap_zoom.script can resize map content without resizing the fixed HUD clip.\n"
+    "\tCUIWindow& MapFrame();\n",
+    "\tCUIStatic& Background() { return m_background; };\n"
+    "\t// Native engine contract: fixed minimap clip/frame used by HUD children.\n"
+    "\tCUIWindow& MapFrame();\n"
+    "\t// GCS live zoom target: map content only; ownership remains with m_clipFrame.\n"
+    "\tCUIWindow& MapContent();\n",
+)
+
+replace_exact(
+    zone_cpp,
+    "CUIWindow& CUIZoneMap::MapFrame()\n"
+    "{\n"
+    "\tR_ASSERT(m_activeMap);\n"
+    "\treturn *m_activeMap;\n"
+    "}\n",
+    "CUIWindow& CUIZoneMap::MapFrame()\n"
+    "{\n"
+    "\treturn m_clipFrame;\n"
+    "}\n"
+    "\n"
+    "CUIWindow& CUIZoneMap::MapContent()\n"
+    "{\n"
+    "\tR_ASSERT(m_activeMap);\n"
+    "\treturn *m_activeMap;\n"
+    "}\n",
+)
+
+# Preserve the public Lua API used by existing gcs_minimap_zoom.script builds.
+# Lua MapFrame() remains a compatibility alias for live map content, while new
+# scripts can use the explicit MapContent() name. Native C++ MapFrame() is no
+# longer overloaded with Lua-only semantics.
+replace_exact(
+    actor_menu_script,
+    "\t\t.def(\"MapFrame\", &CUIZoneMap::MapFrame)\n"
+    "\t\t.def(\"Background\", &CUIZoneMap::Background),\n",
+    "\t\t// GCS: legacy Lua MapFrame() targets live map content for zoom compatibility.\n"
+    "\t\t.def(\"MapFrame\", &CUIZoneMap::MapContent)\n"
+    "\t\t.def(\"MapContent\", &CUIZoneMap::MapContent)\n"
+    "\t\t.def(\"Background\", &CUIZoneMap::Background),\n",
+)
+
+# Fail the transform immediately if either side of the split regresses.
+zone_h_text = zone_h.read_text(encoding="utf-8")
+zone_cpp_text = zone_cpp.read_text(encoding="utf-8")
+actor_menu_script_text = actor_menu_script.read_text(encoding="utf-8")
+
+required = {
+    "native MapFrame declaration": "CUIWindow& MapFrame();" in zone_h_text,
+    "MapContent declaration": "CUIWindow& MapContent();" in zone_h_text,
+    "native fixed clip return": "return m_clipFrame;" in zone_cpp_text,
+    "live map content return": "return *m_activeMap;" in zone_cpp_text,
+    "legacy Lua zoom alias": '.def("MapFrame", &CUIZoneMap::MapContent)' in actor_menu_script_text,
+    "explicit Lua map content API": '.def("MapContent", &CUIZoneMap::MapContent)' in actor_menu_script_text,
+}
+missing = [name for name, ok in required.items() if not ok]
+if missing:
+    raise RuntimeError("Pass 11 minimap ownership split validation failed: " + ", ".join(missing))
+
+print(
+    "GCS Pass 11 applied: serialized HUD UI load/reload/destruction with RenderUI; "
+    "restored native minimap frame ownership while preserving Lua live zoom compatibility."
+)
