@@ -5,6 +5,8 @@
 
 #include <mmsystem.h>
 #include <objbase.h>
+#include <concrt.h>
+#include <cstdlib>
 #include "xrCore.h"
 
 #pragma comment(lib,"winmm.lib")
@@ -27,6 +29,88 @@ namespace CPU
 };
 
 static u32 init_counter = 0;
+static u32 gcs_worker_cap = 0;
+static u32 gcs_worker_cap_available = 0;
+
+static u32 gcs_parse_worker_cap(LPCSTR text)
+{
+	if (!text)
+		return 0;
+
+	LPCSTR value = strstr(text, "-gcs_workers");
+	if (!value)
+		return 0;
+
+	value += xr_strlen("-gcs_workers");
+	while (*value == ' ' || *value == '\t' || *value == '=')
+		++value;
+
+	char* end = nullptr;
+	const unsigned long requested = strtoul(value, &end, 10);
+	if (end == value || requested == 0)
+		return 0;
+
+	SYSTEM_INFO system_info = {};
+	GetSystemInfo(&system_info);
+	u32 available = static_cast<u32>(system_info.dwNumberOfProcessors);
+	if (available == 0)
+		available = 1;
+
+	return requested > available ? available : static_cast<u32>(requested);
+}
+
+static u32 gcs_worker_cap_from_file(LPCSTR path)
+{
+	std::ifstream input(path);
+	if (!input)
+		return 0;
+
+	std::string line;
+	while (std::getline(input, line))
+	{
+		const u32 cap = gcs_parse_worker_cap(line.c_str());
+		if (cap != 0)
+			return cap;
+	}
+
+	return 0;
+}
+
+static void gcs_configure_worker_cap(LPCSTR params, LPCSTR application_path, LPCSTR working_path)
+{
+	u32 cap = gcs_parse_worker_cap(params);
+
+	char path[MAX_PATH];
+	if (cap == 0)
+	{
+		xr_strcpy(path, application_path);
+		xr_strcat(path, "\\..\\commandline.txt");
+		cap = gcs_worker_cap_from_file(path);
+	}
+
+	if (cap == 0)
+	{
+		xr_strcpy(path, working_path);
+		xr_strcat(path, "\\commandline.txt");
+		cap = gcs_worker_cap_from_file(path);
+	}
+
+	if (cap == 0)
+		return;
+
+	SYSTEM_INFO system_info = {};
+	GetSystemInfo(&system_info);
+	gcs_worker_cap_available = static_cast<u32>(system_info.dwNumberOfProcessors);
+	if (gcs_worker_cap_available == 0)
+		gcs_worker_cap_available = 1;
+
+	gcs_worker_cap = cap;
+	concurrency::Scheduler::SetDefaultSchedulerPolicy(
+		concurrency::SchedulerPolicy(
+			2,
+			concurrency::MinConcurrency, 1,
+			concurrency::MaxConcurrency, static_cast<unsigned int>(gcs_worker_cap)));
+}
 
 //extern char g_application_path[256];
 
@@ -72,6 +156,11 @@ void xrCore::_initialize(LPCSTR _ApplicationName, xrLogger::LogCallback cb, BOOL
 		DWORD sz_comp = sizeof(CompName);
 		GetComputerName(CompName, &sz_comp);
 
+		// GCS Pass 15: configure the Concurrency Runtime before any PPL work can
+		// instantiate the process default scheduler. The control is opt-in only;
+		// without -gcs_workers N the upstream/default scheduler policy is untouched.
+		gcs_configure_worker_cap(Params, ApplicationPath, WorkingPath);
+
 		// Mathematics & PSI detection
 		CPU::Detect();
 
@@ -81,6 +170,11 @@ void xrCore::_initialize(LPCSTR _ApplicationName, xrLogger::LogCallback cb, BOOL
 
 		xrLogger::InitLog();
 		_initialize_cpu();
+
+		if (gcs_worker_cap != 0)
+			Msg("* GCS Pass 15: scheduler cap active: %u worker(s), OS logical processors: %u", gcs_worker_cap, gcs_worker_cap_available);
+		else
+			Msg("* GCS Pass 15: scheduler cap available via -gcs_workers N; default scheduler policy unchanged");
 
 		rtc_initialize();
 
@@ -218,4 +312,3 @@ BOOL DllMainXrCore(HANDLE hinstDLL, DWORD ul_reason_for_call, LPVOID lpvReserved
 	}
 	return TRUE;
 }
-#endif // XRCORE_STATIC
