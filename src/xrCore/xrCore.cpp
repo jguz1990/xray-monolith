@@ -84,14 +84,14 @@ static void gcs_configure_worker_cap(LPCSTR params, LPCSTR application_path, LPC
 	if (cap == 0)
 	{
 		xr_strcpy(path, application_path);
-		xr_strcat(path, "\\..\\commandline.txt");
+		strcat(path, "\\..\\commandline.txt");
 		cap = gcs_worker_cap_from_file(path);
 	}
 
 	if (cap == 0)
 	{
 		xr_strcpy(path, working_path);
-		xr_strcat(path, "\\commandline.txt");
+		strcat(path, "\\commandline.txt");
 		cap = gcs_worker_cap_from_file(path);
 	}
 
