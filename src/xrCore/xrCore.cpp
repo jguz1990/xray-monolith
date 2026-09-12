@@ -41,12 +41,12 @@ static u32 gcs_parse_worker_cap(LPCSTR text)
 	if (!value)
 		return 0;
 
-	value += xr_strlen("-gcs_workers");
+	value += sizeof("-gcs_workers") - 1;
 	while (*value == ' ' || *value == '\t' || *value == '=')
 		++value;
 
 	char* end = nullptr;
-	const unsigned long requested = strtoul(value, &end, 10);
+	const unsigned long requested = std::strtoul(value, &end, 10);
 	if (end == value || requested == 0)
 		return 0;
 
