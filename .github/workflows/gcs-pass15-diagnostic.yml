@@ -1,0 +1,69 @@
+name: GCS Pass 15 Compiler Diagnostic
+
+on:
+  push:
+    branches:
+      - gcs-performance
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gcs-pass15-diagnostic
+  cancel-in-progress: true
+
+env:
+  SOLUTION_FILE_PATH: src/engine-vs2022.sln
+  BUILD_CONFIGURATION: DX11
+
+jobs:
+  diagnose:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - name: Configure pagefile
+        uses: al-cheb/configure-pagefile-action@v1.3
+        with:
+          minimum-size: 8GB
+          maximum-size: 8GB
+          disk-root: "C:"
+
+      - name: Checkout gcs-performance
+        uses: actions/checkout@v4
+        with:
+          ref: gcs-performance
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Apply GCS passes 1-11
+        shell: pwsh
+        run: |
+          1..11 | ForEach-Object {
+            python "gcs-engine/apply_pass$_.py" .
+            if ($LASTEXITCODE -ne 0) { throw "apply_pass$_.py failed" }
+          }
+
+      - name: Setup MSBuild x64
+        uses: microsoft/setup-msbuild@v1.3.1
+        with:
+          msbuild-architecture: x64
+
+      - name: Build DX11 and print compiler diagnostics
+        shell: pwsh
+        run: |
+          $log = Join-Path $env:RUNNER_TEMP "gcs-pass15-msbuild.log"
+          & msbuild /m /nologo /v:minimal /p:Configuration=${{ env.BUILD_CONFIGURATION }} ${{ env.SOLUTION_FILE_PATH }} *> $log
+          $buildExit = $LASTEXITCODE
+
+          Write-Host "===== FILTERED COMPILER/LINKER DIAGNOSTICS ====="
+          $matches = Get-Content $log | Select-String -Pattern 'error C[0-9]+|fatal error C[0-9]+|error LNK[0-9]+|fatal error LNK[0-9]+|error MSB[0-9]+|: error:'
+          if ($matches) {
+            $matches | Select-Object -Last 120 | ForEach-Object { Write-Host $_.Line }
+          } else {
+            Write-Host "No standard compiler/linker error pattern matched. Last 120 MSBuild lines follow:"
+            Get-Content $log -Tail 120 | ForEach-Object { Write-Host $_ }
+          }
+          Write-Host "===== END FILTERED DIAGNOSTICS ====="
+
+          if ($buildExit -ne 0) { exit $buildExit }
