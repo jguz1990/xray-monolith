@@ -312,3 +312,4 @@ BOOL DllMainXrCore(HANDLE hinstDLL, DWORD ul_reason_for_call, LPVOID lpvReserved
 	}
 	return TRUE;
 }
+#endif // XRCORE_STATIC
